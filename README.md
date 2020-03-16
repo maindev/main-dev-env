@@ -60,3 +60,8 @@ and all the components will land on your cluster. More on the `helmfile` command
 
 ## Future plans
 
+- make nexus LDAP connection automatic
+- introduce storage solution
+- allow multinode cluster
+- add configuration options to choose what to install
+- ...

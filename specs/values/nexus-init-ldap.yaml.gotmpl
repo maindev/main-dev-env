@@ -1,0 +1,121 @@
+resources:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: nexus-init-ldap
+  data:
+    nexus-init-ldap.sh: |-
+      echo "KEYCLOAK_URL: $KEYCLOAK_URL"
+      echo "LDAP_URL: $LDAP_URL"
+
+      echo "Getting admin access token"
+
+      ADMIN_TOKEN=$(curl -X POST \
+      "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+      -H 'Content-Type: application/x-www-form-urlencoded' \
+      -d "username=$KEYCLOAK_USERNAME" \
+      -d "password=$KEYCLOAK_PASSWORD" \
+      -d 'grant_type=password' \
+      -d 'client_id=admin-cli' | jq -r '.access_token')
+
+      if [ -z $ADMIN_TOKEN ]; then
+          echo "Problem obtaining admin token"
+          exit 1;
+      fi;
+
+      echo "Checking if configuration exists already..."
+      EXISTING_PROVIDERS=$(curl -X GET "$KEYCLOAK_URL/admin/realms/master/components" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -H "Content-Type: application/json" | jq -r '.[].config.connectionUrl')
+
+      if [[ "$EXISTING_PROVIDERS" == *"$LDAP_URL"* ]]; then
+          echo "Already exist";
+          exit 0;
+      else
+          echo "Configuring LDAP"
+          curl -i -X POST "$KEYCLOAK_URL/admin/realms/master/components" \
+          -H "Authorization: Bearer $ADMIN_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '@/scripts/ldap-config/ldap-config.json'
+          echo "LDAP configured"
+      fi;
+
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: nexus-ldap-config
+  stringData:
+    ldap-config.json: |-
+      
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: nexus-ldap-secrets
+  stringData:
+    NEXUS_USERNAME: admin
+    NEXUS_PASSWORD: {{ .Values.config.nexus.adminPassword }}
+- apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: nexus-init-ldap
+  spec:
+    activeDeadlineSeconds: 3600
+    backoffLimit: 6
+    completions: 1
+    parallelism: 1
+    template:
+      spec:
+        restartPolicy: Never
+        containers:
+        - name: init-ldap
+          image: dwdraju/alpine-curl-jq:latest
+          imagePullPolicy: Always
+          command:
+          - sh
+          - /scripts/nexus-init-ldap.sh
+          env:
+          - name: NEXUS_URL
+            value: http://nexus-sonatype-nexus.nexus.svc.cluster.local
+          - name: LDAP_URL
+            value: ldap://ldap-openldap.ldap.svc.cluster.local
+          envFrom:
+          - secretRef:
+              name: nexus-ldap-secrets
+          volumeMounts:
+          - name: scripts
+            mountPath: /scripts/
+          - name: ldap-config
+            mountPath: /scripts/ldap-config/
+        dnsPolicy: ClusterFirst
+        initContainers:
+        - name: wait-for-nexus
+          image: "busybox:1.31"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z -w 2 $NEXUS_URL 80; do
+                  printf "."; sleep 2;
+              done;
+
+              echo 'Nexus OK ✓'
+          env:
+          - name: NEXUS_URL
+            value: http://nexus-sonatype-nexus.nexus.svc.cluster.local
+        volumes:
+        - name: scripts
+          configMap:
+            name: nexus-init-ldap
+            items:
+              - key: nexus-init-ldap.sh
+                path: nexus-init-ldap.sh
+        - name: ldap-config
+          secret:
+            secretName: nexus-ldap-config
+            items:
+              - key: ldap-config.json
+                path: ldap-config.json
