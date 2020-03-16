@@ -1,0 +1,40 @@
+
+keycloak:
+  replicas: 1
+
+  basepath: ""
+  username: admin
+  password: {{ .Values.config.keycloak.adminPassword }}
+
+  ingress:
+    enabled: true
+    hosts:
+      - iam.{{ .Values.config.domain }}
+    {{- if .Values.config.useTls }}
+    tls:
+      - hosts:
+          - iam.{{ .Values.config.domain }}
+        secretName: keycloak-cert
+    {{- end }}
+    annotations:
+      kubernetes.io/ingress.class: "nginx"
+      kubernetes.io/tls-acme: "true"
+      acme.cert-manager.io/http01-edit-in-place: "true"
+      certmanager.io/cluster-issuer: letsencrypt-cluster-issuer
+
+  persistence:
+    deployPostgres: true
+    dbVendor: postgres
+    dbName: keycloak
+    dbUser: keycloak
+
+postgresql:
+  postgresqlUsername: keycloak
+  postgresqlDatabase: keycloak
+  postgresqlPassword: {{ .Values.config.keycloak.postgresqlPassword }}
+
+  persistence:
+    enabled: true
+
+test:
+  enabled: false

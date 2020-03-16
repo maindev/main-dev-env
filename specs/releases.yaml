@@ -1,0 +1,109 @@
+releases:
+  - name: namespaces
+    namespace: kube-system
+    labels:
+      main-dev-app: namespaces
+    chart: ./charts/namespace
+    values:
+      - namespaces:
+        - ingress-controller
+        - cert-manager
+        - ldap
+        - keycloak
+        - nexus
+        - gitlab
+        - monitoring
+    installed: true
+  - name: nginx-ingress
+    namespace: ingress-controller
+    labels:
+      main-dev-app: nginx-ingress
+    chart: stable/nginx-ingress
+    version: ~1.30.3
+    values:
+      - values/nginx-ingress.yaml
+    installed: true
+  - name: cert-manager
+    namespace: cert-manager
+    labels:
+      main-dev-app: cert-manager
+    chart: jetstack/cert-manager
+    version: 0.13.0
+    values:
+      - values/cert-manager.yaml
+    installed: true
+  - name: issuers
+    namespace: cert-manager
+    labels:
+      main-dev-app: cert-manager
+    chart: incubator/raw
+    version: ~0.2.3
+    values:
+      - values/issuers.yaml.gotmpl
+    installed: true
+  - name: ldap
+    namespace: ldap
+    labels:
+      main-dev-app: openldap
+    chart: ./charts/openldap
+    version: ~1.2.3
+    values:
+      - values/openldap.yaml.gotmpl
+    installed: true
+  - name: keycloak
+    namespace: keycloak
+    labels:
+      main-dev-app: keycloak
+    chart: codecentric/keycloak
+    version: ~7.2.0
+    values:
+      - values/keycloak.yaml.gotmpl
+    installed: true
+  - name: keycloak-init-ldap
+    namespace: keycloak
+    labels:
+      main-dev-app: keycloak
+    chart: incubator/raw
+    version: ~0.2.3
+    values:
+      - values/keycloak-init-ldap.yaml.gotmpl
+    installed: true
+  - name: nexus
+    namespace: nexus
+    labels:
+      main-dev-app: nexus
+    chart: oteemo/sonatype-nexus
+    version: ~1.23.0
+    values:
+      - values/nexus.yaml.gotmpl
+    installed: true
+  - name: gitlab
+    namespace: gitlab
+    labels:
+      main-dev-app: gitlab
+    chart: gitlab/gitlab
+    version: ~3.1.1
+    values:
+      - values/gitlab.yaml.gotmpl
+    installed: true
+  - name: ldap-credentials
+    namespace: gitlab
+    labels:
+      main-dev-app: gitlab
+    chart: incubator/raw
+    version: ~0.2.3
+    values:
+      - values/ldap-credentials.yaml.gotmpl
+    installed: true
+  - name: monitoring
+    namespace: monitoring
+    labels:
+      main-dev-app: prometheus-operator
+    chart: stable/prometheus-operator
+    version: ~8.8.1
+    values:
+      - values/prometheus-operator.yaml.gotmpl
+      - values/grafana.yaml.gotmpl
+    installed: true
+
+      

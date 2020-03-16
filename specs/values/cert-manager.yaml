@@ -1,0 +1,4 @@
+ingressShim:
+  defaultIssuerName: letsencrypt-cluster-issuer
+  defaultIssuerKind: ClusterIssuer
+  defaultIssuerGroup: cert-manager.io

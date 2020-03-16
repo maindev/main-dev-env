@@ -1,0 +1,9 @@
+bases:
+  - environments.yaml
+---
+bases:
+  - defaults.yaml
+  - repositories.yaml
+---
+bases:
+  - releases.yaml

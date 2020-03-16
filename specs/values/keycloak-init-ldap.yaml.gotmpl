@@ -1,0 +1,307 @@
+resources:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: keycloak-init-ldap
+  data:
+    keycloak-init-ldap.sh: |-
+      echo "KEYCLOAK_URL: $KEYCLOAK_URL"
+      echo "LDAP_URL: $LDAP_URL"
+
+      echo "Getting admin access token"
+
+      ADMIN_TOKEN=$(curl -X POST \
+      "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+      -H 'Content-Type: application/x-www-form-urlencoded' \
+      -d "username=$KEYCLOAK_USERNAME" \
+      -d "password=$KEYCLOAK_PASSWORD" \
+      -d 'grant_type=password' \
+      -d 'client_id=admin-cli' | jq -r '.access_token')
+
+      if [ -z $ADMIN_TOKEN ]; then
+          echo "Problem obtaining admin token"
+          exit 1;
+      fi;
+
+      echo "Obtained admin access token"
+
+      echo "Checking for existing components..."
+      existingComponents=$(curl -X GET "$KEYCLOAK_URL/admin/realms/master/components" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -H "Content-Type: application/json")
+
+      existingClusterLdapId=$(echo $existingComponents | jq -r '.[] | select(.name=="Cluster LDAP") | .id')
+
+      if [[ ! -z "$existingClusterLdapId" ]]; then
+          echo "Cluster LDAP: Already exist under ID: $existingClusterLdapId";
+      else
+          echo "Configuring: Cluster LDAP"
+          response=$(curl -i -X POST "$KEYCLOAK_URL/admin/realms/master/components" \
+          -H "Authorization: Bearer $ADMIN_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '@/scripts/ldap-config/ldap-config.json')
+          existingClusterLdapId=$(echo "$response" | grep Location | grep -o '/components/.*' | sed s@/components/@@ | tr -d '\r')
+          echo "Cluster LDAP: Configured under ID: $existingClusterLdapId"
+      fi;
+
+      echo "Configuring userPassword attribute mapping..."
+      userPasswordAttr=$(echo $existingComponents | jq -r '.[] | select(.name=="userPassword") | select(.parentId=="'$existingClusterLdapId'") | .id')
+
+      if [[ ! -z "$userPasswordAttr" ]]; then
+          echo "userPassword: Already exist under ID: $userPasswordAttr";
+      else
+          echo "Configuring: userPassword"
+          data='{
+              "name": "userPassword",
+              "providerId": "hardcoded-ldap-attribute-mapper",
+              "providerType": "org.keycloak.storage.ldap.mappers.LDAPStorageMapper",
+              "parentId": "'$existingClusterLdapId'",
+              "config": {
+                  "ldap.attribute.value": [
+                      "password"
+                  ],
+                  "ldap.attribute.name": [
+                      "userPassword"
+                  ]
+              }
+          }'
+
+          response=$(curl -i -X POST "$KEYCLOAK_URL/admin/realms/master/components" \
+          -H "Authorization: Bearer $ADMIN_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "$data")
+          userPasswordAttr=$(echo "$response" | grep Location | grep -o '/components/.*' | sed s@/components/@@ | tr -d '\r')
+          echo "userPassword: configured under ID: $userPasswordAttr"
+      fi;
+
+      echo "Checking for existing components once again..."
+      existingComponents=$(curl -X GET "$KEYCLOAK_URL/admin/realms/master/components" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -H "Content-Type: application/json")
+
+      echo "Configuring email attribute mapping..."
+      emailAttr=$(echo $existingComponents | jq -r '.[] | select(.name=="email") | select(.parentId=="'$existingClusterLdapId'")')
+
+      if [[ -z "$emailAttr" ]]; then
+          echo "Email attribute doesn't exist. Configuring..."
+          data='{
+              "name": "email",
+              "providerId": "user-attribute-ldap-mapper",
+              "providerType": "org.keycloak.storage.ldap.mappers.LDAPStorageMapper",
+              "parentId": "'$existingClusterLdapId'",
+              "config": {
+                  "ldap.attribute": [
+                      "mail"
+                  ],
+                  "is.mandatory.in.ldap": [
+                      "true"
+                  ],
+                  "read.only": [
+                      "false"
+                  ],
+                  "always.read.value.from.ldap": [
+                      "false"
+                  ],
+                  "user.model.attribute": [
+                      "email"
+                  ]
+              }
+          }'
+
+          response=$(curl -i -X POST "$KEYCLOAK_URL/admin/realms/master/components/" \
+          -H "Authorization: Bearer $ADMIN_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "$data")
+
+          emailAttrId=$(echo "$response" | grep Location | grep -o '/components/.*' | sed s@/components/@@ | tr -d '\r')
+          echo "email: configured under ID: $emailAttrId"
+      else
+          echo "Email attribute exist. Configuring is.mandatory.in.ldap"
+          emailIsMandatoryInLdap=$(echo "$emailAttr" | jq '.config."is.mandatory.in.ldap"[0]' | tr -d '\r')
+          if [[ "$emailIsMandatoryInLdap" == "\"true\"" ]]; then
+              echo "email: is.mandatory.in.ldap already configured"
+          else
+              emailAttrId=$(echo "$emailAttr" | jq -r '.id')
+              fixedEmailAttrData=$(echo "$emailAttr" | jq '.config."is.mandatory.in.ldap" = ["true"]')
+
+              response=$(curl -i -X PUT "$KEYCLOAK_URL/admin/realms/master/components/$emailAttrId" \
+              -H "Authorization: Bearer $ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$fixedEmailAttrData")
+
+              echo "email: configured under ID: $emailAttrId"
+          fi;
+      fi;
+
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: keycloak-ldap-config
+  stringData:
+    ldap-config.json: |-
+      {
+        "name": "LDAP",
+        "providerId": "ldap",
+        "providerType": "org.keycloak.storage.UserStorageProvider",
+        "config": {
+          "fullSyncPeriod": [
+            "604800"
+          ],
+          "pagination": [
+            "true"
+          ],
+          "usersDn": [
+            "ou=people,dc=main,dc=dev"
+          ],
+          "connectionPooling": [
+            "true"
+          ],
+          "cachePolicy": [
+            "DEFAULT"
+          ],
+          "useKerberosForPasswordAuthentication": [
+            "false"
+          ],
+          "importEnabled": [
+            "true"
+          ],
+          "enabled": [
+            "true"
+          ],
+          "changedSyncPeriod": [
+            "86400"
+          ],
+          "bindCredential": [
+            "{{ .Values.config.ldap.adminPassword }}"
+          ],
+          "bindDn": [
+            "cn=admin,dc=main,dc=dev"
+          ],
+          "usernameLDAPAttribute": [
+            "uid"
+          ],
+          "lastSync": [
+            "-1"
+          ],
+          "vendor": [
+            "other"
+          ],
+          "uuidLDAPAttribute": [
+            "entryUUID"
+          ],
+          "connectionUrl": [
+            "ldap://ldap-openldap.ldap.svc.cluster.local"
+          ],
+          "allowKerberosAuthentication": [
+            "false"
+          ],
+          "syncRegistrations": [
+            "true"
+          ],
+          "authType": [
+            "simple"
+          ],
+          "customUserSearchFilter": [
+            ""
+          ],
+          "debug": [
+            "false"
+          ],
+          "searchScope": [
+            "1"
+          ],
+          "useTruststoreSpi": [
+            "ldapsOnly"
+          ],
+          "priority": [
+            "0"
+          ],
+          "userObjectClasses": [
+            "mailAccount,inetOrgPerson,organizationalPerson,person,top"
+          ],
+          "rdnLDAPAttribute": [
+            "uid"
+          ],
+          "editMode": [
+              "WRITABLE"
+          ],
+          "validatePasswordPolicy": [
+            "true"
+          ],
+          "batchSizeForSync": [
+            "1000"
+          ]
+        }
+      }
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: keycloak-ldap-secrets
+  stringData:
+    KEYCLOAK_USERNAME: admin
+    KEYCLOAK_PASSWORD: {{ .Values.config.keycloak.adminPassword }}
+- apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: keycloak-init-ldap
+  spec:
+    activeDeadlineSeconds: 3600
+    backoffLimit: 6
+    completions: 1
+    parallelism: 1
+    template:
+      spec:
+        restartPolicy: Never
+        containers:
+        - name: init-ldap
+          image: dwdraju/alpine-curl-jq:latest
+          imagePullPolicy: Always
+          command:
+          - sh
+          - /scripts/keycloak-init-ldap.sh
+          env:
+          - name: KEYCLOAK_URL
+            value: http://keycloak-http.keycloak.svc.cluster.local
+          - name: LDAP_URL
+            value: ldap://ldap-openldap.ldap.svc.cluster.local
+          envFrom:
+          - secretRef:
+              name: keycloak-ldap-secrets
+          volumeMounts:
+          - name: scripts
+            mountPath: /scripts/
+          - name: ldap-config
+            mountPath: /scripts/ldap-config/
+        dnsPolicy: ClusterFirst
+        initContainers:
+        - name: wait-for-keycloak
+          image: "busybox:1.31"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z -w 2 $KEYCLOAK_ADDRESS 80; do
+                  printf "."; sleep 2;
+              done;
+
+              echo 'Keycloak OK ✓'
+          env:
+          - name: KEYCLOAK_ADDRESS
+            value: keycloak-http.keycloak.svc.cluster.local
+        volumes:
+        - name: scripts
+          configMap:
+            name: keycloak-init-ldap
+            items:
+              - key: keycloak-init-ldap.sh
+                path: keycloak-init-ldap.sh
+        - name: ldap-config
+          secret:
+            secretName: keycloak-ldap-config
+            items:
+              - key: ldap-config.json
+                path: ldap-config.json

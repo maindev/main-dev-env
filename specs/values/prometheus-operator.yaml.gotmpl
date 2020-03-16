@@ -1,0 +1,97 @@
+prometheusOperator:
+  createCustomResource: false
+  resources:
+    limits:
+      cpu: 500m
+      memory: 500Mi
+    requests:
+      cpu: 100m
+      memory: 500Mi
+  configReloaderCpu: 50m
+  configReloaderMemory: 50Mi
+
+coreDns:
+  enabled: true
+kubeApiServer:
+  enabled: true
+kubeControllerManager:
+  enabled: false
+kubeDns:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: true
+kubeScheduler:
+  enabled: false
+kubeStateMetrics:
+  enabled: true
+kubelet:
+  enabled: true
+nodeExporter:
+  enabled: true
+
+kube-state-metrics:
+  resources:
+    limits:
+      cpu: 100m
+      memory: 100Mi
+    requests:
+      cpu: 50m
+      memory: 100Mi
+prometheus-node-exporter:
+  resources:
+    limits:
+      cpu: 200m
+      memory: 100Mi
+    requests:
+      cpu: 100m
+      memory: 100Mi
+
+alertmanager:
+  alermanagerSpec:
+    resources:
+      limits:
+        cpu: 100m
+        memory: 100Mi
+      requests:
+        cpu: 50m
+        memory: 100Mi
+
+prometheus:
+  prometheusSpec:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1024Mi
+      requests:
+        cpu: 500m
+        memory: 1024Mi
+  ingress:
+    enabled: true
+    hosts:
+      - prometheus.{{ .Values.config.domain }}
+    annotations:
+      kubernetes.io/ingress.class: "nginx"
+      kubernetes.io/tls-acme: "true"
+      acme.cert-manager.io/http01-edit-in-place: "true"
+      certmanager.k8s.io/cluster-issuer: letsencrypt-cluster-issuer
+    {{- if .Values.config.useTls }}
+    tls:
+      - hosts:
+          - prometheus.{{ .Values.config.domain }}
+        secretName: prometheus-cert
+    {{- end }}
+  additionalServiceMonitors:
+    - name: nginx
+      jobLabel: app
+      endpoints:
+        - path: /metrics
+          port: metrics
+      namespaceSelector:
+        matchNames:
+          - kube-system
+      selector:
+        matchLabels:
+          app: nginx
+          release: nginx

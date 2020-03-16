@@ -1,0 +1,22 @@
+# Generic config for deployed resources
+config:
+  # Domain which will be used as parent for all deployed resources,
+  # e.g. if you provide mydomain.com the nexus address will be nexus.mydomain.com
+  # and gitlab address will be gitlab.mydomain.com
+  domain: lab.example.com
+  # The email address which will be used as cluster admin email,
+  # e.g in CertManager Let's Encrypt certificate provisioner.
+  adminEmail: admin@example.com
+  # Weather TLS should be used for all applications
+  useTls: true
+  # LDAP admin account config
+  ldap:
+    companyName: Example Corp.
+    # will become dc=example,dc=com
+    domain: example.com
+    adminPassword: changeme1
+    configPassword: changeme2
+
+  keycloak:
+    adminPassword: changeme3
+    postgresqlPassword: changeme4

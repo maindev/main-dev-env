@@ -1,0 +1,32 @@
+
+env:
+  LDAP_ORGANISATION: {{ .Values.config.ldap.companyName | quote }}
+  LDAP_DOMAIN: {{ .Values.config.ldap.domain | quote }}
+  LDAP_BACKEND: "hdb"
+  LDAP_TLS: "true"
+  LDAP_TLS_ENFORCE: "false"
+  LDAP_REMOVE_CONFIG_AFTER_SETUP: "true"
+
+adminPassword: {{ .Values.config.ldap.adminPassword }}
+configPassword: {{ .Values.config.ldap.configPassword }}
+
+persistence:
+  enabled: true
+
+customLdifFiles:
+  00-password-policy-module-load.ldif: |-
+    dn: cn=module{0},cn=config
+    changetype: modify
+    add: olcModuleLoad
+    olcModuleLoad: ppolicy
+
+  01-password-policy-definition.ldif: |-
+    dn: olcOverlay={2}ppolicy,olcDatabase={1}hdb,cn=config
+    changetype: add
+    objectClass: olcPPolicyConfig
+    objectClass: olcOverlayConfig
+    olcOverlay: {2}ppolicy
+    olcPPolicyDefault: cn=default,ou=pwpolicies,dc=main,dc=dev
+    olcPPolicyForwardUpdates: FALSE
+    olcPPolicyHashCleartext: TRUE
+    olcPPolicyUseLockout: TRUE
